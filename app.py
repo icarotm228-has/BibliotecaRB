@@ -18,6 +18,11 @@ mantidos e reaproveitados. Se o banco estiver vazio, é populado com dados de te
     2026001 (aluno ativo) / 123456  |  2026002 (aluno suspenso) / 123456
 O modo demonstração (troca de perfil sem senha e botão "Simular atraso") também liga com DEMO_MODE=1
 ou editando MODO_DEMO abaixo.
+
+Deploy (Render): Start Command `gunicorn app:app`. O banco e os dados iniciais são criados no carregamento do
+app (não depende de `python app.py`). Variáveis de ambiente: SECRET_KEY (obrigatória na prática), PORT (o Render
+define), BIBLIOTECARB_DB (caminho do SQLite, p.ex. em um disco persistente), ADMIN_SENHA e BIBLIOTECARIO_SENHA
+(senhas dos usuários criados no seeder; padrão apenas para testes).
 """
 import argparse
 import hashlib
@@ -26,6 +31,8 @@ import os
 import re
 import secrets
 import sqlite3
+import sys
+import tempfile
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -35,7 +42,8 @@ from flask_sqlalchemy import SQLAlchemy
 from markupsafe import Markup, escape
 from sqlalchemy import event, inspect as sa_inspect, or_, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
+from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -57,6 +65,24 @@ DB_PATH = os.environ.get("BIBLIOTECARB_DB", os.path.join(BASE_DIR, "database", "
 if ARGS and ARGS.db:
     DB_PATH = os.path.abspath(ARGS.db)
 
+
+def _garantir_pasta_gravavel(caminho):
+    """Cria a pasta do banco (os.makedirs) e confere permissão de escrita; se não der,
+    usa a pasta temporária do sistema para o app subir em vez de falhar com 'unable to open database file'."""
+    pasta = os.path.dirname(caminho) or "."
+    try:
+        os.makedirs(pasta, exist_ok=True)
+        if os.access(pasta, os.W_OK):
+            return caminho
+    except OSError:
+        pass
+    alternativo = os.path.join(tempfile.gettempdir(), "bibliotecarb.db")
+    print(f"[BibliotecaRB] AVISO: sem permissão de escrita em {pasta}; usando {alternativo}", flush=True)
+    return alternativo
+
+
+DB_PATH = _garantir_pasta_gravavel(DB_PATH)
+
 # MODO DEMONSTRAÇÃO: atalhos de troca de perfil sem senha e botão "Simular atraso". Padrão DESLIGADO.
 MODO_DEMO = False
 if os.environ.get("DEMO_MODE", "").strip() in ("0", "1"):
@@ -70,10 +96,22 @@ COTA = {"ALUNO": 3}                           # cota de livros simultâneos (sem
 LEITORES = ("ALUNO", "PROFESSOR")
 ABERTOS = ("ATIVO", "ATRASADO")               # status de empréstimos ainda não devolvidos
 
+EM_PRODUCAO = bool(os.environ.get("RENDER"))      # o Render define RENDER=true
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    if EM_PRODUCAO:
+        # nunca usar a chave de desenvolvimento em produção (permitiria forjar sessões)
+        SECRET_KEY = secrets.token_hex(32)
+        print("[BibliotecaRB] AVISO: defina a variável SECRET_KEY no painel do Render "
+              "(sem ela, os logins são invalidados a cada reinício).", flush=True)
+    else:
+        SECRET_KEY = "dev-troque-esta-chave"
+
 app = Flask(__name__)
 app.config.update(
-    # Em produção defina a variável de ambiente SECRET_KEY; o padrão serve só para desenvolvimento.
-    SECRET_KEY=os.environ.get("SECRET_KEY", "dev-troque-esta-chave"),
+    SECRET_KEY=SECRET_KEY,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=EM_PRODUCAO,            # cookie de sessão só por HTTPS em produção
     MODO_DEMO=MODO_DEMO,
     SQLALCHEMY_DATABASE_URI="sqlite:///" + Path(DB_PATH).as_posix(),   # sqlite:////caminho/absoluto/banco.db
     SQLALCHEMY_TRACK_MODIFICATIONS=False,
@@ -204,24 +242,45 @@ class Advertencia(db.Model):
 # ----------------------------------------------------------------------------
 # Inicialização do banco e seeder
 # ----------------------------------------------------------------------------
+_BANCO_PRONTO = False   # vira True quando as tabelas foram verificadas/criadas neste processo
+
+
 def init_db():
     """Cria as tabelas (db.create_all), ajusta bancos antigos e popula dados de teste se estiver vazio."""
+    global _BANCO_PRONTO
     with app.app_context():
         novo = not os.path.exists(DB_PATH)
         print(f"[BibliotecaRB] Banco SQLite (SQLAlchemy): {DB_PATH} ({'criando' if novo else 'usando banco existente'})", flush=True)
         os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
-        db.create_all()                      # só cria o que ainda não existe
+        try:
+            db.create_all()                  # só cria o que ainda não existe
+        except OperationalError:             # outro processo criou as tabelas ao mesmo tempo
+            db.session.rollback()
+            db.create_all()
         colunas = [c["name"] for c in sa_inspect(db.engine).get_columns("tb_advertencia")]
         if "data_ocorrencia" not in colunas:  # banco criado por versão anterior
             db.session.execute(text("ALTER TABLE tb_advertencia ADD COLUMN data_ocorrencia DATETIME"))
             db.session.commit()
             print("[BibliotecaRB] Banco antigo atualizado: coluna data_ocorrencia adicionada", flush=True)
         if Usuario.query.count() == 0:
-            seed()
-            print("[BibliotecaRB] Banco vazio: dados iniciais de teste inseridos", flush=True)
+            try:
+                seed()
+                print("[BibliotecaRB] Banco vazio: dados iniciais de teste inseridos", flush=True)
+            except IntegrityError:           # outro processo já populou o banco
+                db.session.rollback()
         print(f"[BibliotecaRB] Dados no banco: {Usuario.query.count()} usuários, {Livro.query.count()} livros, "
               f"{Exemplar.query.count()} exemplares, {Emprestimo.query.count()} empréstimos, "
               f"{Advertencia.query.count()} advertências", flush=True)
+        db.engine.dispose()                  # fecha conexões abertas durante a inicialização
+    _BANCO_PRONTO = True
+
+
+@app.before_request
+def preparar_banco():
+    """Rede de segurança: se o banco não foi preparado no carregamento do app (ex.: falha no boot),
+    tenta agora, antes de qualquer tela. Se falhar, o erro real vai para o log em vez de 'no such table'."""
+    if not _BANCO_PRONTO and request.endpoint != "static":
+        init_db()
 
 
 def seed():
@@ -230,8 +289,9 @@ def seed():
         return Usuario(nome=nome, email=email, cpf=cpf, tipo_usuario=tipo, senha_hash=generate_password_hash(senha), **extra)
 
     db.session.add_all([
-        usuario("Admin Teste", "admin@rb.edu", "000.000.000-00", "ADMIN", "admin123"),
-        usuario("Bibliotecário Teste", "bib@rb.edu", "111.111.111-11", "BIBLIOTECARIO", "bib123"),
+        usuario("Admin Teste", "admin@rb.edu", "000.000.000-00", "ADMIN", os.environ.get("ADMIN_SENHA", "admin123")),
+        usuario("Bibliotecário Teste", "bib@rb.edu", "111.111.111-11", "BIBLIOTECARIO",
+                os.environ.get("BIBLIOTECARIO_SENHA", "bib123")),
         usuario("Aluno Exemplo", "aluno@rb.edu", "222.222.222-22", "ALUNO", "123456", matricula="2026001", curso="Informática"),
         usuario("Aluno Pendente", "pendente@rb.edu", "333.333.333-33", "ALUNO", "123456", matricula="2026002",
                 curso="Informática", status="SUSPENSO"),
@@ -388,27 +448,68 @@ def logout():
 
 
 # ----------------------------------------------------------------------------
+# Diagnóstico: health check e tratamento de erros
+# ----------------------------------------------------------------------------
+@app.route("/healthz")
+def healthz():
+    """Confere se o app consegue ler o banco. No Render: Settings > Health Check Path = /healthz."""
+    try:
+        db.session.execute(text("SELECT 1"))
+        Usuario.query.first()                # falha aqui se as tabelas não existirem
+        return {"status": "ok"}
+    except Exception:
+        app.logger.exception("Health check falhou: banco inacessível ou tabelas ausentes (%s)", DB_PATH)
+        db.session.rollback()
+        return {"status": "erro"}, 500
+
+
+@app.errorhandler(Exception)
+def erro_nao_tratado(e):
+    """Registra o traceback completo no log do servidor e devolve uma página limpa (sem detalhes técnicos)."""
+    if isinstance(e, HTTPException):         # 400, 403, 404... seguem o comportamento normal
+        return e
+    app.logger.exception("Erro não tratado em %s %s", request.method, request.path)
+    try:
+        db.session.rollback()
+    except Exception:
+        pass
+    return ("<!doctype html><meta charset=utf-8><title>Erro — BibliotecaRB</title>"
+            "<body style='font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem'>"
+            "<h1>Ops, algo deu errado</h1><p>O erro foi registrado. Tente novamente em instantes.</p>"
+            "<p><a href='/login'>Voltar ao início</a></p></body>", 500)
+
+
+# ----------------------------------------------------------------------------
 # Dashboard
 # ----------------------------------------------------------------------------
 @app.route("/")
 @app.route("/dashboard")
 @roles_required()
 def index():
-    atualizar_atrasados()
-    if session["tipo"] in ("ADMIN", "BIBLIOTECARIO"):
-        m = {"staff": True,
-             "livros": Livro.query.count(),
-             "exemplares": Exemplar.query.count(),
-             "ativos": Emprestimo.query.filter(Emprestimo.status.in_(ABERTOS)).count(),
-             "atrasados": Emprestimo.query.filter_by(status="ATRASADO").count(),
-             "suspensos": Usuario.query.filter_by(status="SUSPENSO").count()}
-    else:
-        uid = g.usuario.id_usuario
-        m = {"staff": False,
-             "ativos": Emprestimo.query.filter(Emprestimo.id_usuario == uid, Emprestimo.status.in_(ABERTOS)).count(),
-             "atrasados": Emprestimo.query.filter_by(id_usuario=uid, status="ATRASADO").count(),
-             "advertencias": Advertencia.query.filter_by(id_usuario=uid).count(),
-             "status": g.usuario.status}
+    staff = session["tipo"] in ("ADMIN", "BIBLIOTECARIO")
+    try:
+        atualizar_atrasados()
+        if staff:
+            m = {"staff": True,
+                 "livros": Livro.query.count(),
+                 "exemplares": Exemplar.query.count(),
+                 "ativos": Emprestimo.query.filter(Emprestimo.status.in_(ABERTOS)).count(),
+                 "atrasados": Emprestimo.query.filter_by(status="ATRASADO").count(),
+                 "suspensos": Usuario.query.filter_by(status="SUSPENSO").count()}
+        else:
+            uid = g.usuario.id_usuario
+            m = {"staff": False,
+                 "ativos": Emprestimo.query.filter(Emprestimo.id_usuario == uid, Emprestimo.status.in_(ABERTOS)).count(),
+                 "atrasados": Emprestimo.query.filter_by(id_usuario=uid, status="ATRASADO").count(),
+                 "advertencias": Advertencia.query.filter_by(id_usuario=uid).count(),
+                 "status": g.usuario.status}
+    except SQLAlchemyError:
+        # falha de banco: grava o traceback completo no log e mostra o painel vazio, sem derrubar a requisição
+        app.logger.exception("Falha ao carregar os indicadores do painel")
+        db.session.rollback()
+        flash("Não foi possível carregar os indicadores agora. Tente novamente em instantes.", "error")
+        m = ({"staff": True, "livros": 0, "exemplares": 0, "ativos": 0, "atrasados": 0, "suspensos": 0} if staff
+             else {"staff": False, "ativos": 0, "atrasados": 0, "advertencias": 0, "status": "—"})
     return render_template("index.html", m=m)
 
 
@@ -617,11 +718,24 @@ def relatorios():
                            em_dia=[e for e in abertos if e.status == "ATIVO"], advs=advs, proprio=proprio)
 
 
+# Com gunicorn (Render) o arquivo é importado, e `python app.py` não é executado:
+# por isso as tabelas e os dados iniciais são garantidos já no carregamento do módulo.
+if __name__ != "__main__":
+    print(f"[BibliotecaRB] Ambiente: Render={EM_PRODUCAO}, SECRET_KEY definida={'sim' if os.environ.get('SECRET_KEY') else 'NÃO'}, "
+          f"Python {sys.version.split()[0]}", flush=True)
+    try:
+        init_db()
+    except Exception:                        # o app continua no ar e /healthz acusa o problema; o traceback vai para o log
+        app.logger.exception("FALHA ao inicializar o banco em %s", DB_PATH)
+
 if __name__ == "__main__":
     if ARGS.reset and os.path.exists(DB_PATH):
         os.remove(DB_PATH)
         print(f"[BibliotecaRB] --reset: banco removido ({DB_PATH})", flush=True)
     init_db()
+    # O Render define PORT; localmente usa 5000 e só aceita conexões da própria máquina.
+    port = int(os.environ.get("PORT", 5000))
+    host = os.environ.get("HOST", "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1")
     print(f"[BibliotecaRB] Modo demonstração: {'LIGADO' if app.config['MODO_DEMO'] else 'DESLIGADO'}", flush=True)
-    print("[BibliotecaRB] Servidor em http://127.0.0.1:5000  (Ctrl+C para encerrar)", flush=True)
-    app.run(host="127.0.0.1", port=5000, debug=os.environ.get("FLASK_DEBUG") == "1")
+    print(f"[BibliotecaRB] Servidor em http://{host}:{port}  (Ctrl+C para encerrar)", flush=True)
+    app.run(host=host, port=port, debug=os.environ.get("FLASK_DEBUG") == "1")

@@ -4,11 +4,16 @@ venv/
 __pycache__/
 *.pyc
 
-# Banco SQLite local (é recriado automaticamente ao rodar python app.py)
+# Bancos SQLite locais/temporários (recriados automaticamente ao iniciar o app)
 *.db
+*.db-journal
+*.sqlite
+*.sqlite3
+instance/
 
 # Segredos e configurações locais
 .env
+.env.*
 
 # Editores e sistema
 .idea/

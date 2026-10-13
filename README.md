@@ -39,3 +39,10 @@ templates/          páginas HTML (Jinja2)
 static/             CSS e JavaScript
 database/schema.sql referência do esquema do banco
 ```
+
+## Deploy no Render
+- **Build Command:** `pip install -r requirements.txt`
+- **Start Command:** `gunicorn app:app`
+- **Variáveis de ambiente:** `SECRET_KEY` (valor aleatório), `ADMIN_SENHA` e `BIBLIOTECARIO_SENHA` (senhas dos usuários iniciais).
+
+> No plano gratuito do Render o disco é temporário: o banco SQLite volta ao estado inicial a cada novo deploy ou reinício. Para guardar os dados, use um disco persistente (`BIBLIOTECARB_DB=/var/data/bibliotecarb.db`) ou um banco PostgreSQL.
