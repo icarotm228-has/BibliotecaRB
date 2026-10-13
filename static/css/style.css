@@ -1,0 +1,6 @@
+/* Ajustes pontuais sobre o Tailwind (carregado via CDN em base.html) */
+:root { color-scheme: light; }
+body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+input:focus, select:focus, textarea:focus { outline: 2px solid #93c5fd; outline-offset: 0; }
+table tbody tr:hover { background-color: #f8fafc; }
+@media print { nav, header, #confirm-modal, form { display: none !important; } }

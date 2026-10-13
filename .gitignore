@@ -1,0 +1,17 @@
+# Ambiente virtual e cache do Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Banco SQLite local (é recriado automaticamente ao rodar python app.py)
+*.db
+
+# Segredos e configurações locais
+.env
+
+# Editores e sistema
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

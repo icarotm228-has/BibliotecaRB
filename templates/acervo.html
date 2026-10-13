@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Acervo — BibliotecaRB{% endblock %}
+{% block content %}
+{% if session.tipo == 'BIBLIOTECARIO' %}
+<section class="bg-white rounded-xl border p-4 mb-4">
+  <h2 class="font-semibold text-blue-900 mb-3">Cadastrar livro e exemplares</h2>
+  <form method="post" data-confirm="Cadastrar o livro “{titulo}” com os tombos informados?" class="space-y-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      {% for nome, rotulo, req in [('titulo','Título',1),('autor','Autor',1),('isbn','ISBN',1),('categoria','Categoria',1),('editora','Editora',0)] %}
+      <label class="block text-xs font-medium text-slate-600">{{ rotulo }}
+        <input name="{{ nome }}" {{ 'required' if req }} class="mt-1 w-full border rounded-lg px-3 py-2 text-sm font-normal">
+      </label>
+      {% endfor %}
+      <label class="block text-xs font-medium text-slate-600">Tombos (separados por vírgula)
+        <input name="tombos" required placeholder="T-0007, T-0008" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm font-normal">
+      </label>
+    </div>
+    <button class="px-4 py-2 rounded-lg text-sm font-medium bg-blue-900 text-white hover:bg-blue-800">Cadastrar</button>
+  </form>
+</section>
+{% endif %}
+
+<section class="bg-white rounded-xl border p-4">
+  <h2 class="font-semibold text-blue-900 mb-3">Consulta ao acervo</h2>
+  <form method="get" class="mb-3">
+    <input id="busca" name="q" value="{{ q }}" type="search" autocomplete="off"
+           placeholder="Buscar por título, autor, categoria ou tombo (filtra enquanto digita; Enter busca no servidor)"
+           class="w-full border rounded-lg px-3 py-2 text-sm">
+  </form>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-left text-slate-500 border-b">
+        <tr><th class="py-2 pr-4">Tombo</th><th class="pr-4">Título</th><th class="pr-4">Autor</th><th class="pr-4">Categoria</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+      {% for l in livros %}
+        {% for x in (l.exemplares or [none]) %}
+        <tr class="linha-acervo border-b last:border-0" data-busca="{{ (l.titulo ~ ' ' ~ l.autor ~ ' ' ~ l.categoria ~ ' ' ~ (x.tombo if x else '')) | lower }}">
+          <td class="py-2 pr-4 whitespace-nowrap">{{ x.tombo if x else '—' }}</td>
+          <td class="pr-4">{{ l.titulo }}</td>
+          <td class="pr-4">{{ l.autor }}</td>
+          <td class="pr-4">{{ l.categoria }}</td>
+          <td>{% if x %}{{ badge(x.status) }}{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      {% else %}
+        <tr><td colspan="5" class="py-4 text-slate-400">Nenhum livro encontrado.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}BibliotecaRB{% endblock %}</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script defer src="{{ url_for('static', filename='js/main.js') }}"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen">
+{% if session.user_id %}
+<header class="bg-blue-900 text-white">
+  <div class="max-w-7xl mx-auto px-3 md:px-6 py-3 flex flex-wrap items-center justify-between gap-2">
+    <a href="{{ url_for('index') }}" class="font-bold text-lg">📚 BibliotecaRB</a>
+    <div class="flex flex-wrap items-center gap-3 text-sm">
+      {% if MODO_DEMO %}
+      <form method="post" class="flex items-center gap-1 text-xs">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <span class="text-blue-200 hidden sm:inline">Perfil de teste:</span>
+        {% for t, n in [('ADMIN','Admin'),('BIBLIOTECARIO','Bibliotecário'),('ALUNO','Aluno')] %}
+        <button formaction="{{ url_for('entrar_como', tipo=t) }}"
+                class="px-2 py-1 rounded {{ 'bg-white text-blue-900 font-semibold' if session.tipo == t else 'border border-blue-300 hover:bg-blue-800' }}">{{ n }}</button>
+        {% endfor %}
+      </form>
+      {% endif %}
+      <span>{{ session.nome }} <span class="text-blue-200">({{ PERFIS[session.tipo] }})</span></span>
+      <form method="post" action="{{ url_for('logout') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="px-3 py-1 rounded-lg border border-blue-300 hover:bg-blue-800">Sair</button>
+      </form>
+    </div>
+  </div>
+</header>
+{% endif %}
+
+<div class="{{ 'max-w-7xl mx-auto p-3 md:p-6 flex flex-col md:flex-row gap-4' if session.user_id else 'min-h-screen flex items-center justify-center p-4' }}">
+  {% if session.user_id %}
+  {% set menu_itens = {
+      'ADMIN': [('index','Painel'),('usuarios','Usuários')],
+      'BIBLIOTECARIO': [('index','Painel'),('emprestimos','Empréstimo'),('devolucoes','Devolução'),('acervo','Acervo'),('relatorios','Relatórios')],
+      'ALUNO': [('index','Início'),('acervo','Consultar acervo'),('relatorios','Meus empréstimos e advertências')],
+      'PROFESSOR': [('index','Início'),('acervo','Consultar acervo'),('relatorios','Meus empréstimos e advertências')]
+  }[session.tipo] %}
+  <nav class="flex md:flex-col gap-2 overflow-x-auto md:w-56 shrink-0">
+    {% for endpoint, nome in menu_itens %}
+    <a href="{{ url_for(endpoint) }}"
+       class="whitespace-nowrap px-3 py-2 rounded-lg text-sm {{ 'bg-blue-900 text-white' if request.endpoint == endpoint else 'bg-white border hover:bg-slate-50' }}">{{ nome }}</a>
+    {% endfor %}
+  </nav>
+  {% endif %}
+
+  <main class="flex-1 min-w-0 {{ '' if session.user_id else 'w-full max-w-sm flex-none' }}">
+    {% with mensagens = get_flashed_messages(with_categories=true) %}
+      {% for categoria, msg in mensagens %}
+      <div class="mb-3 p-3 rounded-lg text-sm border
+        {{ {'success':'bg-green-50 text-green-800 border-green-200','error':'bg-red-50 text-red-800 border-red-200','warning':'bg-yellow-50 text-yellow-800 border-yellow-200'}.get(categoria, 'bg-blue-50 text-blue-800 border-blue-200') }}">{{ msg }}</div>
+      {% endfor %}
+    {% endwith %}
+    {% block content %}{% endblock %}
+  </main>
+</div>
+
+<!-- Modal de confirmação (acionado por form[data-confirm]) -->
+<div id="confirm-modal" class="hidden fixed inset-0 bg-slate-900/50 z-50 items-center justify-center p-4">
+  <div class="bg-white rounded-xl p-5 w-full max-w-sm shadow-xl">
+    <h3 class="font-semibold text-blue-900 mb-2">Confirmar ação</h3>
+    <p id="confirm-text" class="text-sm text-slate-600 mb-4"></p>
+    <div class="flex justify-end gap-2">
+      <button type="button" id="confirm-cancel" class="px-3 py-2 text-sm rounded-lg border">Cancelar</button>
+      <button type="button" id="confirm-ok" class="px-3 py-2 text-sm rounded-lg bg-blue-900 text-white hover:bg-blue-800">Confirmar</button>
+    </div>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Painel — BibliotecaRB{% endblock %}
+{% macro card(titulo, valor, cor) %}
+<div class="bg-white rounded-xl border p-4">
+  <div class="text-xs text-slate-500">{{ titulo }}</div>
+  <div class="text-3xl font-bold {{ cor }}">{{ valor }}</div>
+</div>
+{% endmacro %}
+{% block content %}
+<h1 class="text-xl font-semibold text-blue-900 mb-4">Olá, {{ session.nome }}</h1>
+
+{% if m.staff %}
+<div class="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
+  {{ card('Total de livros (' ~ m.exemplares ~ ' exemplares)', m.livros, 'text-blue-900') }}
+  {{ card('Empréstimos ativos', m.ativos, 'text-yellow-600') }}
+  {{ card('Empréstimos atrasados', m.atrasados, 'text-red-600') }}
+  {{ card('Usuários suspensos', m.suspensos, 'text-red-600') }}
+</div>
+{% else %}
+<div class="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-4">
+  {{ card('Meus empréstimos ativos', m.ativos, 'text-yellow-600') }}
+  {{ card('Empréstimos atrasados', m.atrasados, 'text-red-600') }}
+  {{ card('Advertências recebidas', m.advertencias, 'text-red-600') }}
+</div>
+<p class="text-sm mb-4">Situação do cadastro: {{ badge(m.status) }}</p>
+{% endif %}
+
+<section class="bg-white rounded-xl border p-4">
+  <h2 class="font-semibold text-blue-900 mb-2">Acesso rápido</h2>
+  <div class="flex flex-wrap gap-2 text-sm">
+    {% if session.tipo == 'ADMIN' %}
+      <a class="px-3 py-2 rounded-lg bg-blue-900 text-white" href="{{ url_for('usuarios') }}">Gerenciar usuários</a>
+    {% elif session.tipo == 'BIBLIOTECARIO' %}
+      <a class="px-3 py-2 rounded-lg bg-blue-900 text-white" href="{{ url_for('emprestimos') }}">Registrar empréstimo</a>
+      <a class="px-3 py-2 rounded-lg bg-blue-900 text-white" href="{{ url_for('devolucoes') }}">Registrar devolução</a>
+      <a class="px-3 py-2 rounded-lg border" href="{{ url_for('relatorios') }}">Ver atrasos</a>
+    {% else %}
+      <a class="px-3 py-2 rounded-lg bg-blue-900 text-white" href="{{ url_for('acervo') }}">Consultar acervo</a>
+      <a class="px-3 py-2 rounded-lg border" href="{{ url_for('relatorios') }}">Meus empréstimos</a>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}

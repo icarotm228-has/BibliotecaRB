@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Usuários — BibliotecaRB{% endblock %}
+{% block content %}
+<section class="bg-white rounded-xl border p-4 mb-4">
+  <h2 class="font-semibold text-blue-900 mb-3">Cadastrar usuário</h2>
+  <form method="post" data-confirm="Cadastrar {nome} como {tipo}?" class="space-y-3">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="acao" value="cadastrar">
+    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <label class="block text-xs font-medium text-slate-600">Tipo
+        <select id="tipo" name="tipo" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm font-normal">
+          <option value="ALUNO">Aluno</option><option value="PROFESSOR">Professor</option><option value="BIBLIOTECARIO">Bibliotecário</option>
+        </select>
+      </label>
+      {% for nome, rotulo, extra in [('nome','Nome completo',''),('email','E-mail','type=email'),('cpf','CPF',''),('senha','Senha inicial','type=password')] %}
+      <label class="block text-xs font-medium text-slate-600">{{ rotulo }}
+        <input name="{{ nome }}" required {{ extra }} class="mt-1 w-full border rounded-lg px-3 py-2 text-sm font-normal">
+      </label>
+      {% endfor %}
+      <label class="campos-ALUNO block text-xs font-medium text-slate-600">Matrícula
+        <input name="matricula" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm font-normal"></label>
+      <label class="campos-ALUNO block text-xs font-medium text-slate-600">Curso
+        <input name="curso" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm font-normal"></label>
+      <label class="campos-PROFESSOR hidden block text-xs font-medium text-slate-600">SIAPE
+        <input name="siape" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm font-normal"></label>
+      <label class="campos-PROFESSOR hidden block text-xs font-medium text-slate-600">Departamento
+        <input name="departamento" class="mt-1 w-full border rounded-lg px-3 py-2 text-sm font-normal"></label>
+    </div>
+    <button class="px-4 py-2 rounded-lg text-sm font-medium bg-blue-900 text-white hover:bg-blue-800">Cadastrar</button>
+  </form>
+</section>
+
+<section class="bg-white rounded-xl border p-4">
+  <h2 class="font-semibold text-blue-900 mb-3">Usuários cadastrados</h2>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-left text-slate-500 border-b">
+        <tr><th class="py-2 pr-4">Nome</th><th class="pr-4">Identificador</th><th class="pr-4">Perfil</th><th class="pr-4">Status</th><th>Ação</th></tr>
+      </thead>
+      <tbody>
+      {% for u in lista %}
+        <tr class="border-b last:border-0">
+          <td class="py-2 pr-4">{{ u.nome }}</td>
+          <td class="pr-4">{{ u.matricula or u.siape or u.email }}</td>
+          <td class="pr-4">{{ PERFIS[u.tipo_usuario] }}</td>
+          <td class="pr-4">{{ badge(u.status) }}</td>
+          <td>
+            {% if u.tipo_usuario != 'ADMIN' %}
+            {% set suspender = u.status == 'ATIVO' %}
+            <form method="post" data-confirm="{{ 'Suspender' if suspender else 'Reativar' }} o cadastro de {{ u.nome }}?">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+              <input type="hidden" name="acao" value="status">
+              <input type="hidden" name="id_usuario" value="{{ u.id_usuario }}">
+              <input type="hidden" name="novo_status" value="{{ 'SUSPENSO' if suspender else 'ATIVO' }}">
+              <button class="text-xs px-2 py-1 rounded border {{ 'text-red-600 border-red-300' if suspender else 'text-green-700 border-green-300' }}">
+                {{ 'Suspender cadastro' if suspender else 'Reativar' }}</button>
+            </form>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}

@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Relatórios — BibliotecaRB{% endblock %}
+{% macro tabela(linhas, mostra_atraso) %}
+<div class="overflow-x-auto">
+  <table class="w-full text-sm">
+    <thead class="text-left text-slate-500 border-b">
+      <tr><th class="py-2 pr-4">Tombo</th><th class="pr-4">Livro</th>{% if not proprio %}<th class="pr-4">Usuário</th>{% endif %}
+          <th class="pr-4">Saída</th><th class="pr-4">Prazo</th><th>{{ 'Atraso' if mostra_atraso else 'Situação' }}</th></tr>
+    </thead>
+    <tbody>
+    {% for e in linhas %}
+      <tr class="border-b last:border-0">
+        <td class="py-2 pr-4">{{ e.tombo_exemplar }}</td><td class="pr-4">{{ e.titulo }}</td>
+        {% if not proprio %}<td class="pr-4">{{ e.cliente.nome }}</td>{% endif %}
+        <td class="pr-4">{{ e.data_emprestimo | data }}</td><td class="pr-4">{{ e.data_prevista_devolucao | data }}</td>
+        <td>{% if mostra_atraso %}<span class="text-red-600 font-semibold">{{ e.dias_atraso }} dia(s)</span>{% else %}{{ badge(e.status) }}{% endif %}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="py-4 text-slate-400">Nenhum registro.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endmacro %}
+{% block content %}
+<section class="bg-white rounded-xl border border-l-4 border-l-red-500 p-4 mb-4">
+  <h2 class="font-semibold text-red-700 mb-3">Empréstimos atrasados</h2>
+  {{ tabela(atrasados, true) }}
+</section>
+<section class="bg-white rounded-xl border p-4 mb-4">
+  <h2 class="font-semibold text-blue-900 mb-3">Empréstimos ativos (no prazo)</h2>
+  {{ tabela(em_dia, false) }}
+</section>
+<section class="bg-white rounded-xl border p-4">
+  <h2 class="font-semibold text-blue-900 mb-3">{{ 'Minhas advertências' if proprio else 'Advertências aplicadas' }}</h2>
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead class="text-left text-slate-500 border-b">
+        <tr>{% if not proprio %}<th class="py-2 pr-4">Usuário</th>{% endif %}<th class="pr-4">Data</th><th class="pr-4">Motivo</th><th>Dias de suspensão</th></tr>
+      </thead>
+      <tbody>
+      {% for a in advs %}
+        <tr class="border-b last:border-0">
+          {% if not proprio %}<td class="py-2 pr-4">{{ a.usuario.nome }}</td>{% endif %}
+          <td class="py-2 pr-4 whitespace-nowrap">{{ a.data_ocorrencia | data }}</td><td class="pr-4">{{ a.motivo }}</td><td>{{ a.dias_suspensao or '—' }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="py-4 text-slate-400">Nenhuma advertência.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
