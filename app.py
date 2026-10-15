@@ -30,9 +30,12 @@ import hmac
 import os
 import re
 import secrets
+import socket
 import sqlite3
 import sys
 import tempfile
+import threading
+import webbrowser
 from datetime import datetime, timedelta
 from functools import wraps
 from pathlib import Path
@@ -46,12 +49,36 @@ from sqlalchemy.exc import IntegrityError, OperationalError, SQLAlchemyError
 from werkzeug.exceptions import HTTPException
 from werkzeug.security import check_password_hash, generate_password_hash
 
+try:                                          # servidor WSGI para Windows (gunicorn não roda no Windows)
+    from waitress import serve as servir_waitress
+except ImportError:                           # sem waitress, usa o servidor embutido do Flask
+    servir_waitress = None
+
+
+# ----------------------------------------------------------------------------
+# Execução como programa (.exe) empacotado pelo PyInstaller
+# ----------------------------------------------------------------------------
+EXECUTAVEL = getattr(sys, "frozen", False)
+if EXECUTAVEL:
+    RECURSOS_DIR = sys._MEIPASS                  # templates/ e static/ (pasta temporária do --onefile)
+    EXE_DIR = os.path.dirname(sys.executable)    # pasta do .exe: aqui ficam o banco e o log
+    if sys.stdout is None or sys.stderr is None:  # build sem console (--noconsole): grava as mensagens em arquivo
+        try:
+            _arq_log = open(os.path.join(EXE_DIR, "bibliotecarb.log"), "a", encoding="utf-8", buffering=1)
+        except OSError:
+            _arq_log = open(os.devnull, "w")
+        sys.stdout = sys.stdout or _arq_log
+        sys.stderr = sys.stderr or _arq_log
+else:
+    RECURSOS_DIR = EXE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 
 def _ler_argumentos():
     ap = argparse.ArgumentParser(description="BibliotecaRB - MVP (Flask + SQLAlchemy)")
     ap.add_argument("--db", help="caminho de um banco SQLite existente (padrão: database/bibliotecarb.db)")
     ap.add_argument("--demo", action="store_true", help="liga o modo demonstração")
     ap.add_argument("--reset", action="store_true", help="apaga o banco e recria com os dados de teste")
+    ap.add_argument("--abrir", action="store_true", help="abre o navegador ao iniciar (automático no .exe)")
     return ap.parse_args()
 
 
@@ -60,8 +87,8 @@ ARGS = _ler_argumentos() if __name__ == "__main__" else None   # lido antes de c
 # ----------------------------------------------------------------------------
 # Configuração
 # ----------------------------------------------------------------------------
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get("BIBLIOTECARB_DB", os.path.join(BASE_DIR, "database", "bibliotecarb.db"))
+# o banco fica ao lado do .exe (nunca na pasta temporária do PyInstaller, que é apagada ao fechar)
+DB_PATH = os.environ.get("BIBLIOTECARB_DB", os.path.join(EXE_DIR, "database", "bibliotecarb.db"))
 if ARGS and ARGS.db:
     DB_PATH = os.path.abspath(ARGS.db)
 
@@ -76,7 +103,9 @@ def _garantir_pasta_gravavel(caminho):
             return caminho
     except OSError:
         pass
-    alternativo = os.path.join(tempfile.gettempdir(), "bibliotecarb.db")
+    pasta_alt = os.path.join(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir(), "BibliotecaRB")
+    os.makedirs(pasta_alt, exist_ok=True)
+    alternativo = os.path.join(pasta_alt, "bibliotecarb.db")
     print(f"[BibliotecaRB] AVISO: sem permissão de escrita em {pasta}; usando {alternativo}", flush=True)
     return alternativo
 
@@ -107,7 +136,11 @@ if not SECRET_KEY:
     else:
         SECRET_KEY = "dev-troque-esta-chave"
 
-app = Flask(__name__)
+if EXECUTAVEL:   # .exe: templates e static foram desempacotados em sys._MEIPASS
+    app = Flask(__name__, template_folder=os.path.join(RECURSOS_DIR, "templates"),
+                static_folder=os.path.join(RECURSOS_DIR, "static"))
+else:
+    app = Flask(__name__)
 app.config.update(
     SECRET_KEY=SECRET_KEY,
     SESSION_COOKIE_SAMESITE="Lax",
@@ -403,7 +436,7 @@ app.jinja_env.globals["PERFIS"] = PERFIS
 
 @app.context_processor
 def injetar_modo_demo():
-    return {"MODO_DEMO": app.config["MODO_DEMO"]}   # lido a cada requisição pelos templates
+    return {"MODO_DEMO": app.config["MODO_DEMO"], "EXECUTAVEL": EXECUTAVEL}   # lidos a cada requisição pelos templates
 
 
 # ----------------------------------------------------------------------------
@@ -445,6 +478,18 @@ def entrar_como(tipo):
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+@app.route("/encerrar", methods=["POST"])
+@roles_required("ADMIN", "BIBLIOTECARIO")
+def encerrar():
+    """Somente no .exe: encerra o programa (substitui fechar a janela do terminal, que não existe no build sem console)."""
+    if not EXECUTAVEL:
+        abort(404)
+    threading.Timer(0.5, os._exit, args=[0]).start()
+    return ("<!doctype html><meta charset=utf-8><title>BibliotecaRB encerrado</title>"
+            "<body style='font-family:system-ui;max-width:32rem;margin:4rem auto;padding:0 1rem'>"
+            "<h1>BibliotecaRB encerrado</h1><p>Você já pode fechar esta aba.</p></body>")
 
 
 # ----------------------------------------------------------------------------
@@ -728,14 +773,32 @@ if __name__ != "__main__":
     except Exception:                        # o app continua no ar e /healthz acusa o problema; o traceback vai para o log
         app.logger.exception("FALHA ao inicializar o banco em %s", DB_PATH)
 
+def _porta_livre(preferida):
+    """Usa a porta preferida se estiver livre; senão tenta as seguintes (evita erro ao abrir o programa duas vezes)."""
+    for porta in range(preferida, preferida + 20):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as teste:
+            if teste.connect_ex(("127.0.0.1", porta)) != 0:      # ninguém escutando nessa porta
+                return porta
+    return preferida
+
+
 if __name__ == "__main__":
     if ARGS.reset and os.path.exists(DB_PATH):
         os.remove(DB_PATH)
         print(f"[BibliotecaRB] --reset: banco removido ({DB_PATH})", flush=True)
     init_db()
-    # O Render define PORT; localmente usa 5000 e só aceita conexões da própria máquina.
+    na_nuvem = bool(os.environ.get("PORT"))                        # o Render define PORT
     port = int(os.environ.get("PORT", 5000))
-    host = os.environ.get("HOST", "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1")
+    if not na_nuvem:
+        port = _porta_livre(port)
+    host = os.environ.get("HOST", "0.0.0.0" if na_nuvem else "127.0.0.1")
+    debug = os.environ.get("FLASK_DEBUG") == "1"
+    url = f"http://127.0.0.1:{port}"
     print(f"[BibliotecaRB] Modo demonstração: {'LIGADO' if app.config['MODO_DEMO'] else 'DESLIGADO'}", flush=True)
-    print(f"[BibliotecaRB] Servidor em http://{host}:{port}  (Ctrl+C para encerrar)", flush=True)
-    app.run(host=host, port=port, debug=os.environ.get("FLASK_DEBUG") == "1")
+    print(f"[BibliotecaRB] Servidor em {url}  (Ctrl+C para encerrar)", flush=True)
+    if EXECUTAVEL or ARGS.abrir:                                   # abre o navegador padrão logo após o servidor subir
+        threading.Timer(1.5, webbrowser.open, args=[url]).start()
+    if servir_waitress and not debug:
+        servir_waitress(app, host=host, port=port, threads=4)      # Waitress (Windows)
+    else:
+        app.run(host=host, port=port, debug=debug)                 # servidor embutido do Flask

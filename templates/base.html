@@ -25,6 +25,12 @@
       </form>
       {% endif %}
       <span>{{ session.nome }} <span class="text-blue-200">({{ PERFIS[session.tipo] }})</span></span>
+      {% if EXECUTAVEL and session.tipo in ('ADMIN', 'BIBLIOTECARIO') %}
+      <form method="post" action="{{ url_for('encerrar') }}" data-confirm="Encerrar o BibliotecaRB? O sistema deixará de responder até ser aberto novamente.">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button class="px-3 py-1 rounded-lg border border-red-300 text-red-100 hover:bg-red-700">Encerrar sistema</button>
+      </form>
+      {% endif %}
       <form method="post" action="{{ url_for('logout') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button class="px-3 py-1 rounded-lg border border-blue-300 hover:bg-blue-800">Sair</button>

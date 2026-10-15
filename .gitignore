@@ -6,6 +6,8 @@ __pycache__/
 
 # Bancos SQLite locais/temporários (recriados automaticamente ao iniciar o app)
 *.db
+# Exceção: o banco inicial vai junto com o código (opção escolhida para o Render)
+!database/bibliotecarb.db
 *.db-journal
 *.sqlite
 *.sqlite3
@@ -20,3 +22,9 @@ instance/
 .vscode/
 .DS_Store
 Thumbs.db
+
+# PyInstaller
+build/
+dist/
+*.spec
+*.log
