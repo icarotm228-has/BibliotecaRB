@@ -2,10 +2,8 @@
 
 Sistema web de gestão de biblioteca escolar (acervo, empréstimos, devoluções e usuários), desenvolvido como projeto da disciplina de Engenharia de Software I — IFPA, Campus Tucuruí.
 
-**Aplicação publicada:** https://SEU-APP.onrender.com *(substitua pelo endereço do Render)*
+**Aplicação publicada:** https://bibliotecarb.onrender.com
 **Repositório:** https://github.com/icarotm228-has/BibliotecaRB
-
-> No plano gratuito do Render o serviço "dorme" após alguns minutos sem acessos; o primeiro acesso pode levar cerca de 1 minuto.
 
 ## Funcionalidades
 - **Administrador:** cadastra alunos, professores e bibliotecários; suspende e reativa cadastros.
